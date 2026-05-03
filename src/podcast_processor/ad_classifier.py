@@ -1335,13 +1335,13 @@ class AdClassifier:
         is_transition: bool,
         gap_seconds: float,
     ) -> bool:
-        if not self.config.enable_boundary_refinement:
-            return has_strong_cue
-
-        if has_strong_cue or is_transition:
-            return True
-
-        return gap_seconds <= 10.0
+        # Require a positive cue (URL / promo / CTA / phone / transition) before
+        # extending an ad span onto a neighbour. Proximity alone is not enough:
+        # podcast hosts routinely speak immediately before/after sponsor breaks
+        # ("welcome to the show", "that's it for part one", news intros) and a
+        # bare gap rule swept those into ad blocks every time.
+        del gap_seconds  # intentionally unused
+        return has_strong_cue or is_transition
 
     @staticmethod
     def _neighbor_confidence(
@@ -1516,14 +1516,17 @@ class AdClassifier:
         ]
 
         new_identifications: List[Dict[str, Any]] = []
+        refined_start = float(refinement.refined_start)
+        refined_end = float(refinement.refined_end)
         for seg in transcript_segments:
             seg_start = float(seg.start_time or 0.0)
             seg_end = float(seg.end_time or seg_start)
-            # Keep segments that overlap the refined window. This preserves the
-            # containing segment when refined boundaries fall mid-segment.
-            if seg_start <= float(refinement.refined_end) and seg_end >= float(
-                refinement.refined_start
-            ):
+            # Keep segments that overlap the refined window with strict
+            # exclusion at the trailing edge: a segment whose start_time
+            # equals refined_end is the *next* segment, not part of the ad.
+            # Including it caused content to be flagged whenever an ad ended
+            # exactly on a transcript-segment boundary.
+            if seg_start < refined_end and seg_end > refined_start:
                 new_identifications.append(
                     {
                         "transcript_segment_id": seg.id,
